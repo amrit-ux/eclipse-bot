@@ -19,50 +19,43 @@ require("dotenv").config();
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
-if (!TOKEN || !CLIENT_ID) {
-  console.log("❌ ENV missing");
-  process.exit(1);
-}
-
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
 const setupData = {};
 const config = {};
+const claimed = {};
 
 // ================= READY =================
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   const commands = [
+    new SlashCommandBuilder().setName("setup").setDescription("Setup Ticket System"),
     new SlashCommandBuilder()
-      .setName("setup")
-      .setDescription("Setup ticket system (R.O.T.I style)")
+      .setName("rename")
+      .setDescription("Rename ticket")
+      .addStringOption(opt =>
+        opt.setName("name").setDescription("New name").setRequired(true)
+      )
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-  await rest.put(
-    Routes.applicationCommands(CLIENT_ID),
-    { body: commands }
-  );
-
-  console.log("✅ Commands loaded");
+  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 });
 
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
-
   if (!interaction.guild) return;
 
   try {
 
-    // ===== /setup =====
+    // ===== SETUP =====
     if (interaction.isChatInputCommand()) {
 
       if (interaction.commandName === "setup") {
-
         setupData[interaction.user.id] = {};
 
         const roleMenu = new RoleSelectMenuBuilder()
@@ -70,122 +63,75 @@ client.on("interactionCreate", async (interaction) => {
           .setPlaceholder("Select Staff Role");
 
         return interaction.reply({
-          content: "👨‍💼 Select staff role:",
+          content: "👨‍💼 Select Staff Role",
           components: [new ActionRowBuilder().addComponents(roleMenu)],
           flags: 64
         });
+      }
+
+      // ===== RENAME =====
+      if (interaction.commandName === "rename") {
+        const newName = interaction.options.getString("name");
+
+        if (!interaction.channel.name.startsWith("ticket-"))
+          return interaction.reply({ content: "❌ Not a ticket", flags: 64 });
+
+        await interaction.channel.setName(newName);
+        return interaction.reply({ content: "✅ Renamed", flags: 64 });
       }
     }
 
     // ===== ROLE SELECT =====
     if (interaction.isRoleSelectMenu()) {
-
       setupData[interaction.user.id].staff = interaction.values[0];
 
       const catMenu = new ChannelSelectMenuBuilder()
         .setCustomId("select_category")
-        .setPlaceholder("Select Category")
         .setChannelTypes(ChannelType.GuildCategory);
 
       return interaction.update({
-        content: "📁 Select ticket category:",
+        content: "📁 Select Category",
         components: [new ActionRowBuilder().addComponents(catMenu)]
       });
     }
 
-    // ===== CATEGORY SELECT =====
+    // ===== CATEGORY =====
     if (interaction.isChannelSelectMenu() && interaction.customId === "select_category") {
-
       setupData[interaction.user.id].category = interaction.values[0];
 
-      const logMenu = new ChannelSelectMenuBuilder()
-        .setCustomId("select_logs")
-        .setPlaceholder("Select Logs Channel (optional)")
-        .setChannelTypes(ChannelType.GuildText);
-
-      const skipBtn = new ButtonBuilder()
-        .setCustomId("skip_logs")
-        .setLabel("Skip Logs")
-        .setStyle(ButtonStyle.Secondary);
-
-      return interaction.update({
-        content: "📜 Select logs channel or skip:",
-        components: [
-          new ActionRowBuilder().addComponents(logMenu),
-          new ActionRowBuilder().addComponents(skipBtn)
-        ]
-      });
-    }
-
-    // ===== LOG SELECT =====
-    if (interaction.isChannelSelectMenu() && interaction.customId === "select_logs") {
-
-      setupData[interaction.user.id].logs = interaction.values[0];
-
       const confirm = new ButtonBuilder()
         .setCustomId("confirm_setup")
-        .setLabel("✅ Confirm Setup")
+        .setLabel("Confirm")
         .setStyle(ButtonStyle.Success);
 
       return interaction.update({
-        content: "✅ Confirm setup?",
-        components: [new ActionRowBuilder().addComponents(confirm)]
-      });
-    }
-
-    // ===== SKIP LOGS =====
-    if (interaction.isButton() && interaction.customId === "skip_logs") {
-
-      setupData[interaction.user.id].logs = null;
-
-      const confirm = new ButtonBuilder()
-        .setCustomId("confirm_setup")
-        .setLabel("✅ Confirm Setup")
-        .setStyle(ButtonStyle.Success);
-
-      return interaction.update({
-        content: "✅ Confirm setup?",
+        content: "✅ Confirm Setup",
         components: [new ActionRowBuilder().addComponents(confirm)]
       });
     }
 
     // ===== CONFIRM =====
     if (interaction.isButton() && interaction.customId === "confirm_setup") {
+      config[interaction.guild.id] = setupData[interaction.user.id];
 
-      const data = setupData[interaction.user.id];
-
-      config[interaction.guild.id] = data;
-
-      // 🎫 PANEL AUTO SEND
       const menu = new StringSelectMenuBuilder()
         .setCustomId("ticket_menu")
-        .setPlaceholder("🎫 Create Ticket")
-        .addOptions([
-          { label: "Support", value: "support" },
-          { label: "Billing", value: "billing" },
-          { label: "Report", value: "report" }
-        ]);
+        .setPlaceholder("Create Ticket")
+        .addOptions([{ label: "Support", value: "support" }]);
 
       await interaction.channel.send({
-        content: "🎫 Create a ticket:",
+        content: "🎫 Open Ticket",
         components: [new ActionRowBuilder().addComponents(menu)]
       });
 
       delete setupData[interaction.user.id];
 
-      return interaction.update({
-        content: "✅ Setup Complete & Panel Sent!",
-        components: []
-      });
+      return interaction.update({ content: "✅ Done", components: [] });
     }
 
     // ===== CREATE TICKET =====
     if (interaction.isStringSelectMenu() && interaction.customId === "ticket_menu") {
-
       const data = config[interaction.guild.id];
-      if (!data) return;
-
-      await interaction.deferReply({ flags: 64 });
 
       const channel = await interaction.guild.channels.create({
         name: `ticket-${interaction.user.username}`,
@@ -202,38 +148,86 @@ client.on("interactionCreate", async (interaction) => {
           },
           {
             id: data.staff,
-            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
+            allow: [PermissionsBitField.Flags.ViewChannel]
           }
         ]
       });
 
-      const closeBtn = new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("🔒 Close")
-        .setStyle(ButtonStyle.Danger);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("transcript").setLabel("Transcript").setStyle(ButtonStyle.Secondary)
+      );
 
-      await channel.send({
-        content: `👋 ${interaction.user}`,
-        components: [new ActionRowBuilder().addComponents(closeBtn)]
-      });
+      await channel.send({ content: `👋 ${interaction.user}`, components: [row] });
 
-      await interaction.editReply("✅ Ticket Created");
+      return interaction.reply({ content: "✅ Ticket Created", flags: 64 });
+    }
+
+    // ===== CLAIM =====
+    if (interaction.isButton() && interaction.customId === "claim") {
+      const data = config[interaction.guild.id];
+
+      if (!interaction.member.roles.cache.has(data.staff))
+        return interaction.reply({ content: "❌ Staff only", flags: 64 });
+
+      claimed[interaction.channel.id] = interaction.user.id;
+
+      await interaction.channel.send(`🛠️ Claimed by ${interaction.user}`);
+      return interaction.reply({ content: "✅ Claimed", flags: 64 });
     }
 
     // ===== CLOSE =====
-    if (interaction.isButton() && interaction.customId === "close_ticket") {
+    if (interaction.isButton() && interaction.customId === "close") {
+      const data = config[interaction.guild.id];
 
-      await interaction.deferUpdate();
+      if (!interaction.member.roles.cache.has(data.staff))
+        return interaction.reply({ content: "❌ Staff only", flags: 64 });
 
-      await interaction.channel.send("🔒 Closing...");
+      await interaction.reply("🔒 Closing...");
 
       setTimeout(() => {
         interaction.channel.delete().catch(() => {});
       }, 3000);
     }
 
+    // ===== TRANSCRIPT =====
+    if (interaction.isButton() && interaction.customId === "transcript") {
+
+      const messages = await interaction.channel.messages.fetch({ limit: 100 });
+
+      let html = `
+      <html>
+      <head>
+      <style>
+      body { background:#0d1117; color:white; font-family:sans-serif; }
+      .msg { margin:10px; padding:10px; background:#161b22; border-radius:8px; }
+      .user { color:#58a6ff; font-weight:bold; }
+      </style>
+      </head>
+      <body>
+      <h2>Ticket Transcript</h2>
+      `;
+
+      messages.reverse().forEach(m => {
+        html += `<div class="msg"><span class="user">${m.author.tag}</span>: ${m.content}</div>`;
+      });
+
+      html += "</body></html>";
+
+      const fs = require("fs");
+      const file = `transcript-${interaction.channel.id}.html`;
+
+      fs.writeFileSync(file, html);
+
+      await interaction.reply({
+        content: "📄 Transcript generated",
+        files: [file]
+      });
+    }
+
   } catch (err) {
-    console.error(err);
+    console.log(err);
   }
 });
 
