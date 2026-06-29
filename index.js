@@ -2,7 +2,6 @@ require("dotenv").config();
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
-});
 
 client.on('ready', () => {
   console.log(`Bot is online as ${client.user.tag}`);
