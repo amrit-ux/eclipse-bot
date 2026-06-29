@@ -1,21 +1,3 @@
-require("dotenv").config();
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-
-client.on('ready', () => {
-  console.log(`Bot is online as ${client.user.tag}`);
-});
-
-client.on('messageCreate', message => {
-  if (message.author.bot) return;
-
-  if (message.content === '!hi') {
-    message.reply('Hello 👋');
-  }
-});
-
-client.login(process.env.TOKEN);
 const { Client, GatewayIntentBits, ButtonBuilder, ButtonStyle, ActionRowBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 require("dotenv").config();
 
@@ -31,8 +13,15 @@ client.once("ready", () => {
   console.log(`Bot is online as ${client.user.tag}`);
 });
 
-// COMMAND: !panel
-client.on("messageCreate", async (message) => {
+// SIMPLE COMMAND
+client.on('messageCreate', message => {
+  if (message.author.bot) return;
+
+  if (message.content === '!hi') {
+    message.reply('Hello 👋');
+  }
+
+  // PANEL COMMAND
   if (message.content === "!panel") {
     const button = new ButtonBuilder()
       .setCustomId("create_ticket")
