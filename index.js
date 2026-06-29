@@ -6,164 +6,202 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
-  PermissionsBitField
+  PermissionsBitField,
+  SlashCommandBuilder,
+  REST,
+  Routes
 } = require("discord.js");
 
 require("dotenv").config();
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
+// 🧠 TEMP STORAGE (restart pe reset hoga)
+const config = {};
+
+// ================= READY =================
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// ================= PANEL COMMAND =================
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
+// ================= SLASH COMMANDS =================
+const commands = [
+  new SlashCommandBuilder()
+    .setName("setup")
+    .setDescription("Setup ticket system")
+    .addRoleOption(opt =>
+      opt.setName("staff_role")
+        .setDescription("Select staff role")
+        .setRequired(true)
+    )
+    .addChannelOption(opt =>
+      opt.setName("category")
+        .setDescription("Ticket category")
+        .setRequired(true)
+    )
+    .addChannelOption(opt =>
+      opt.setName("logs")
+        .setDescription("Logs channel")
+        .setRequired(false)
+    ),
 
-  if (message.content === "!panel") {
+  new SlashCommandBuilder()
+    .setName("panel")
+    .setDescription("Send ticket panel")
 
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId("ticket_menu")
-      .setPlaceholder("🎫 Select ticket type")
-      .addOptions([
-        {
-          label: "Support",
-          description: "Get help from support team",
-          value: "support"
-        },
-        {
-          label: "Billing",
-          description: "Payment / billing issues",
-          value: "billing"
-        },
-        {
-          label: "Report",
-          description: "Report a user",
-          value: "report"
-        }
-      ]);
+].map(cmd => cmd.toJSON());
 
-    const row = new ActionRowBuilder().addComponents(menu);
+const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
-    await message.channel.send({
-      content: "🎫 **Create a Ticket**\nSelect category below:",
-      components: [row]
-    });
-  }
-});
+(async () => {
+  await rest.put(
+    Routes.applicationCommands(process.env.CLIENT_ID),
+    { body: commands }
+  );
+  console.log("✅ Commands loaded");
+})();
 
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
+
   if (!interaction.guild) return;
 
-  try {
+  // ===== SETUP =====
+  if (interaction.isChatInputCommand()) {
 
-    // ========= SELECT MENU =========
-    if (interaction.isStringSelectMenu()) {
+    if (interaction.commandName === "setup") {
 
-      if (interaction.customId !== "ticket_menu") return;
+      const staff = interaction.options.getRole("staff_role");
+      const category = interaction.options.getChannel("category");
+      const logs = interaction.options.getChannel("logs");
 
-      const choice = interaction.values[0];
+      config[interaction.guild.id] = {
+        staff: staff.id,
+        category: category.id,
+        logs: logs ? logs.id : null
+      };
 
-      // prevent duplicate
-      const existing = interaction.guild.channels.cache.find(
-        ch => ch.topic === interaction.user.id
-      );
+      return interaction.reply({
+        content: "✅ Ticket system setup complete!",
+        ephemeral: true
+      });
+    }
 
-      if (existing) {
+    // ===== PANEL =====
+    if (interaction.commandName === "panel") {
+
+      if (!config[interaction.guild.id]) {
         return interaction.reply({
-          content: "❌ You already have an open ticket!",
+          content: "❌ Run /setup first",
           ephemeral: true
         });
       }
 
-      await interaction.reply({
-        content: "⏳ Creating ticket...",
-        ephemeral: true
-      });
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId("ticket_menu")
+        .setPlaceholder("🎫 Select category")
+        .addOptions([
+          { label: "Support", value: "support" },
+          { label: "Billing", value: "billing" },
+          { label: "Report", value: "report" }
+        ]);
 
-      const channel = await interaction.guild.channels.create({
-        name: `${choice}-${interaction.user.username}`,
-        type: ChannelType.GuildText,
-        topic: interaction.user.id,
-        permissionOverwrites: [
-          {
-            id: interaction.guild.id,
-            deny: [PermissionsBitField.Flags.ViewChannel]
-          },
-          {
-            id: interaction.user.id,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages
-            ]
-          }
-        ]
-      });
+      const row = new ActionRowBuilder().addComponents(menu);
 
-      const closeBtn = new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("🔒 Close")
-        .setStyle(ButtonStyle.Danger);
-
-      const row = new ActionRowBuilder().addComponents(closeBtn);
-
-      await channel.send({
-        content: `👋 Hello ${interaction.user}\nCategory: **${choice}**\nPlease explain your issue.`,
+      return interaction.reply({
+        content: "🎫 Create a ticket:",
         components: [row]
       });
-
-      await interaction.editReply("✅ Ticket created!");
-    }
-
-    // ========= CLOSE =========
-    if (interaction.isButton()) {
-
-      if (interaction.customId === "close_ticket") {
-
-        const deleteBtn = new ButtonBuilder()
-          .setCustomId("delete_ticket")
-          .setLabel("🗑 Delete")
-          .setStyle(ButtonStyle.Danger);
-
-        const row = new ActionRowBuilder().addComponents(deleteBtn);
-
-        await interaction.reply({
-          content: "🔒 Ticket closed. Staff will review.\nClick below to delete.",
-          components: [row]
-        });
-      }
-
-      if (interaction.customId === "delete_ticket") {
-
-        await interaction.reply({
-          content: "🗑 Deleting ticket...",
-          ephemeral: true
-        });
-
-        setTimeout(() => {
-          interaction.channel.delete().catch(() => {});
-        }, 2000);
-      }
-    }
-
-  } catch (err) {
-    console.error(err);
-
-    if (!interaction.replied) {
-      interaction.reply({
-        content: "⚠️ Error occurred",
-        ephemeral: true
-      }).catch(() => {});
     }
   }
+
+  // ===== CREATE TICKET =====
+  if (interaction.isStringSelectMenu()) {
+
+    const data = config[interaction.guild.id];
+    if (!data) return;
+
+    const existing = interaction.guild.channels.cache.find(
+      ch => ch.topic === interaction.user.id
+    );
+
+    if (existing) {
+      return interaction.reply({
+        content: "❌ Already have ticket",
+        ephemeral: true
+      });
+    }
+
+    await interaction.reply({ content: "⏳ Creating...", ephemeral: true });
+
+    const channel = await interaction.guild.channels.create({
+      name: `ticket-${interaction.user.username}`,
+      type: ChannelType.GuildText,
+      parent: data.category,
+      topic: interaction.user.id,
+      permissionOverwrites: [
+        {
+          id: interaction.guild.id,
+          deny: [PermissionsBitField.Flags.ViewChannel]
+        },
+        {
+          id: interaction.user.id,
+          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
+        },
+        {
+          id: data.staff,
+          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
+        }
+      ]
+    });
+
+    const closeBtn = new ButtonBuilder()
+      .setCustomId("close")
+      .setLabel("🔒 Close")
+      .setStyle(ButtonStyle.Danger);
+
+    const row = new ActionRowBuilder().addComponents(closeBtn);
+
+    await channel.send({
+      content: `👋 ${interaction.user} welcome!`,
+      components: [row]
+    });
+
+    // LOG
+    if (data.logs) {
+      const logChannel = interaction.guild.channels.cache.get(data.logs);
+      if (logChannel) {
+        logChannel.send(`📥 Ticket created by ${interaction.user.tag}`);
+      }
+    }
+
+    interaction.editReply("✅ Ticket created");
+  }
+
+  // ===== CLOSE =====
+  if (interaction.isButton()) {
+
+    const data = config[interaction.guild.id];
+
+    if (interaction.customId === "close") {
+
+      await interaction.reply("🔒 Ticket closed");
+
+      if (data?.logs) {
+        const logChannel = interaction.guild.channels.cache.get(data.logs);
+        if (logChannel) {
+          logChannel.send(`🔒 Closed by ${interaction.user.tag}`);
+        }
+      }
+
+      setTimeout(() => {
+        interaction.channel.delete().catch(() => {});
+      }, 3000);
+    }
+  }
+
 });
 
 client.login(process.env.TOKEN);
