@@ -14,6 +14,20 @@ const {
 
 require("dotenv").config();
 
+// ✅ SAFE ENV CHECK
+const TOKEN = process.env.TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+
+if (!TOKEN) {
+  console.log("❌ TOKEN missing");
+  process.exit(1);
+}
+
+if (!CLIENT_ID) {
+  console.log("❌ CLIENT_ID missing");
+  process.exit(1);
+}
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
@@ -21,46 +35,42 @@ const client = new Client({
 const config = {};
 
 // ================= READY =================
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+
+  try {
+    const commands = [
+      new SlashCommandBuilder()
+        .setName("setup")
+        .setDescription("Setup ticket system")
+        .addRoleOption(opt =>
+          opt.setName("staff_role").setDescription("Staff role").setRequired(true)
+        )
+        .addChannelOption(opt =>
+          opt.setName("category").setDescription("Category").setRequired(true)
+        )
+        .addChannelOption(opt =>
+          opt.setName("logs").setDescription("Logs").setRequired(false)
+        ),
+
+      new SlashCommandBuilder()
+        .setName("panel")
+        .setDescription("Send ticket panel")
+    ].map(c => c.toJSON());
+
+    const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+    // ⚡ FAST REGISTER (guild-based)
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log("✅ Slash commands registered");
+  } catch (err) {
+    console.error("❌ Command error:", err);
+  }
 });
-
-// ================= SLASH COMMANDS =================
-const commands = [
-  new SlashCommandBuilder()
-    .setName("setup")
-    .setDescription("Setup ticket system")
-    .addRoleOption(opt =>
-      opt.setName("staff_role")
-        .setDescription("Select staff role")
-        .setRequired(true)
-    )
-    .addChannelOption(opt =>
-      opt.setName("category")
-        .setDescription("Ticket category")
-        .setRequired(true)
-    )
-    .addChannelOption(opt =>
-      opt.setName("logs")
-        .setDescription("Logs channel")
-        .setRequired(false)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("panel")
-    .setDescription("Send ticket panel")
-
-].map(cmd => cmd.toJSON());
-
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
-
-(async () => {
-  await rest.put(
-    Routes.applicationCommands(process.env.CLIENT_ID),
-    { body: commands }
-  );
-  console.log("✅ Commands loaded");
-})();
 
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
@@ -81,11 +91,11 @@ client.on("interactionCreate", async (interaction) => {
         config[interaction.guild.id] = {
           staff: staff.id,
           category: category.id,
-          logs: logs ? logs.id : null
+          logs: logs?.id || null
         };
 
         return interaction.reply({
-          content: "✅ Ticket system setup complete!",
+          content: "✅ Setup complete!",
           flags: 64
         });
       }
@@ -125,7 +135,7 @@ client.on("interactionCreate", async (interaction) => {
       const data = config[interaction.guild.id];
       if (!data) return;
 
-      await interaction.deferReply({ flags: 64 }); // ✅ FIX
+      await interaction.deferReply({ flags: 64 });
 
       const existing = interaction.guild.channels.cache.find(
         ch => ch.topic === interaction.user.id
@@ -162,45 +172,33 @@ client.on("interactionCreate", async (interaction) => {
         ]
       });
 
-      const closeBtn = new ButtonBuilder()
+      const btn = new ButtonBuilder()
         .setCustomId("close")
         .setLabel("🔒 Close")
         .setStyle(ButtonStyle.Danger);
 
-      const row = new ActionRowBuilder().addComponents(closeBtn);
-
       await channel.send({
-        content: `👋 ${interaction.user} welcome!`,
-        components: [row]
+        content: `👋 ${interaction.user}`,
+        components: [new ActionRowBuilder().addComponents(btn)]
       });
 
       if (data.logs) {
-        const logChannel = interaction.guild.channels.cache.get(data.logs);
-        if (logChannel) {
-          logChannel.send(`📥 Ticket created by ${interaction.user.tag}`);
-        }
+        interaction.guild.channels.cache
+          .get(data.logs)
+          ?.send(`📥 Ticket by ${interaction.user.tag}`);
       }
 
       await interaction.editReply("✅ Ticket created");
     }
 
-    // ===== BUTTON =====
+    // ===== CLOSE =====
     if (interaction.isButton()) {
-
-      const data = config[interaction.guild.id];
 
       if (interaction.customId === "close") {
 
-        await interaction.deferUpdate(); // ✅ FIX
+        await interaction.deferUpdate();
 
-        await interaction.channel.send("🔒 Ticket closed");
-
-        if (data?.logs) {
-          const logChannel = interaction.guild.channels.cache.get(data.logs);
-          if (logChannel) {
-            logChannel.send(`🔒 Closed by ${interaction.user.tag}`);
-          }
-        }
+        await interaction.channel.send("🔒 Closing...");
 
         setTimeout(() => {
           interaction.channel.delete().catch(() => {});
@@ -213,4 +211,4 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-client.login(process.env.TOKEN);
+client.login(TOKEN);
