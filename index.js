@@ -1,13 +1,54 @@
+const { Client, GatewayIntentBits, ButtonBuilder, ButtonStyle, ActionRowBuilder, ChannelType, PermissionsBitField } = require('discord.js');
+require("dotenv").config();
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+client.once("ready", () => {
+  console.log(`Bot is online as ${client.user.tag}`);
+});
+
+// COMMANDS
+client.on('messageCreate', message => {
+  if (message.author.bot) return;
+
+  if (message.content === '!hi') {
+    message.reply('Hello 👋');
+  }
+
+  if (message.content === "!panel") {
+    const button = new ButtonBuilder()
+      .setCustomId("create_ticket")
+      .setLabel("🎫 Create Ticket")
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    message.channel.send({
+      content: "Click to create a ticket",
+      components: [row]
+    });
+  }
+});
+
+// BUTTON SYSTEM
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
+  if (!interaction.guild) return;
 
   // CREATE TICKET
   if (interaction.customId === "create_ticket") {
 
     await interaction.deferReply({ ephemeral: true });
 
+    // 🔥 prevent duplicate (using user ID)
     const existing = interaction.guild.channels.cache.find(
-      ch => ch.name === `ticket-${interaction.user.username}`
+      ch => ch.topic === interaction.user.id
     );
 
     if (existing) {
@@ -17,6 +58,7 @@ client.on("interactionCreate", async (interaction) => {
     const channel = await interaction.guild.channels.create({
       name: `ticket-${interaction.user.username}`,
       type: ChannelType.GuildText,
+      topic: interaction.user.id, // 🔥 important
       permissionOverwrites: [
         {
           id: interaction.guild.id,
@@ -47,12 +89,17 @@ client.on("interactionCreate", async (interaction) => {
   // CLOSE TICKET
   if (interaction.customId === "close_ticket") {
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.reply({
+      content: "🔒 Closing ticket in 3 seconds...",
+      ephemeral: true
+    });
 
-    await interaction.editReply("🔒 Closing ticket in 3 seconds...");
-
-    setTimeout(() => {
-      interaction.channel.delete().catch(() => {});
+    setTimeout(async () => {
+      if (interaction.channel) {
+        await interaction.channel.delete().catch(console.error);
+      }
     }, 3000);
   }
 });
+
+client.login(process.env.TOKEN);
