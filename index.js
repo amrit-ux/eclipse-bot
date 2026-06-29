@@ -11,9 +11,11 @@ const {
   PermissionsBitField,
   SlashCommandBuilder,
   REST,
-  Routes
+  Routes,
+  EmbedBuilder
 } = require("discord.js");
 
+const fs = require("fs");
 require("dotenv").config();
 
 const TOKEN = process.env.TOKEN;
@@ -23,135 +25,107 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-const setupData = {};
-const config = {};
-const claimed = {};
+// ===== DATABASE =====
+const dbFile = "./data.json";
+let db = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile)) : {};
 
-// ================= READY =================
+function saveDB() {
+  fs.writeFileSync(dbFile, JSON.stringify(db, null, 2));
+}
+
+// ===== READY =====
 client.once("ready", async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`✅ ${client.user.tag}`);
 
   const commands = [
-    new SlashCommandBuilder().setName("setup").setDescription("Setup Ticket System"),
+    new SlashCommandBuilder().setName("setup").setDescription("Setup Ticket"),
     new SlashCommandBuilder()
       .setName("rename")
-      .setDescription("Rename ticket")
-      .addStringOption(opt =>
-        opt.setName("name").setDescription("New name").setRequired(true)
-      )
+      .setDescription("Rename Ticket")
+      .addStringOption(o => o.setName("name").setRequired(true)),
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
-
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 });
 
-// ================= INTERACTIONS =================
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.guild) return;
+// ===== INTERACTIONS =====
+client.on("interactionCreate", async (i) => {
+  if (!i.guild) return;
 
   try {
 
     // ===== SETUP =====
-    if (interaction.isChatInputCommand()) {
+    if (i.isChatInputCommand() && i.commandName === "setup") {
 
-      if (interaction.commandName === "setup") {
-        setupData[interaction.user.id] = {};
+      const roleMenu = new RoleSelectMenuBuilder()
+        .setCustomId("role")
+        .setPlaceholder("Select Staff Role");
 
-        const roleMenu = new RoleSelectMenuBuilder()
-          .setCustomId("select_role")
-          .setPlaceholder("Select Staff Role");
+      return i.reply({
+        content: "Select Staff Role",
+        components: [new ActionRowBuilder().addComponents(roleMenu)],
+        flags: 64
+      });
+    }
 
-        return interaction.reply({
-          content: "👨‍💼 Select Staff Role",
-          components: [new ActionRowBuilder().addComponents(roleMenu)],
-          flags: 64
-        });
-      }
+    // ===== RENAME =====
+    if (i.isChatInputCommand() && i.commandName === "rename") {
+      if (!i.channel.name.startsWith("ticket-"))
+        return i.reply({ content: "Not a ticket", flags: 64 });
 
-      // ===== RENAME =====
-      if (interaction.commandName === "rename") {
-        const newName = interaction.options.getString("name");
-
-        if (!interaction.channel.name.startsWith("ticket-"))
-          return interaction.reply({ content: "❌ Not a ticket", flags: 64 });
-
-        await interaction.channel.setName(newName);
-        return interaction.reply({ content: "✅ Renamed", flags: 64 });
-      }
+      await i.channel.setName(i.options.getString("name"));
+      return i.reply({ content: "Renamed", flags: 64 });
     }
 
     // ===== ROLE SELECT =====
-    if (interaction.isRoleSelectMenu()) {
-      setupData[interaction.user.id].staff = interaction.values[0];
+    if (i.isRoleSelectMenu()) {
+      db[i.guild.id] = { staff: i.values[0], count: 0 };
+      saveDB();
 
-      const catMenu = new ChannelSelectMenuBuilder()
-        .setCustomId("select_category")
-        .setChannelTypes(ChannelType.GuildCategory);
-
-      return interaction.update({
-        content: "📁 Select Category",
-        components: [new ActionRowBuilder().addComponents(catMenu)]
-      });
-    }
-
-    // ===== CATEGORY =====
-    if (interaction.isChannelSelectMenu() && interaction.customId === "select_category") {
-      setupData[interaction.user.id].category = interaction.values[0];
-
-      const confirm = new ButtonBuilder()
-        .setCustomId("confirm_setup")
-        .setLabel("Confirm")
-        .setStyle(ButtonStyle.Success);
-
-      return interaction.update({
-        content: "✅ Confirm Setup",
-        components: [new ActionRowBuilder().addComponents(confirm)]
-      });
-    }
-
-    // ===== CONFIRM =====
-    if (interaction.isButton() && interaction.customId === "confirm_setup") {
-      config[interaction.guild.id] = setupData[interaction.user.id];
-
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId("ticket_menu")
+      const panel = new StringSelectMenuBuilder()
+        .setCustomId("panel")
         .setPlaceholder("Create Ticket")
-        .addOptions([{ label: "Support", value: "support" }]);
+        .addOptions([
+          { label: "Support", value: "support" },
+          { label: "Billing", value: "billing" }
+        ]);
 
-      await interaction.channel.send({
-        content: "🎫 Open Ticket",
-        components: [new ActionRowBuilder().addComponents(menu)]
+      return i.update({
+        content: "Setup Done",
+        components: [new ActionRowBuilder().addComponents(panel)]
       });
-
-      delete setupData[interaction.user.id];
-
-      return interaction.update({ content: "✅ Done", components: [] });
     }
 
-    // ===== CREATE TICKET =====
-    if (interaction.isStringSelectMenu() && interaction.customId === "ticket_menu") {
-      const data = config[interaction.guild.id];
+    // ===== CREATE =====
+    if (i.isStringSelectMenu() && i.customId === "panel") {
 
-      const channel = await interaction.guild.channels.create({
-        name: `ticket-${interaction.user.username}`,
+      const data = db[i.guild.id];
+      if (!data) return;
+
+      // cooldown
+      if (db[`cool_${i.user.id}`] && Date.now() - db[`cool_${i.user.id}`] < 5000)
+        return i.reply({ content: "Wait before creating ticket", flags: 64 });
+
+      db[`cool_${i.user.id}`] = Date.now();
+
+      data.count++;
+      saveDB();
+
+      const name = `ticket-${String(data.count).padStart(3, "0")}`;
+
+      const ch = await i.guild.channels.create({
+        name,
         type: ChannelType.GuildText,
-        parent: data.category,
         permissionOverwrites: [
-          {
-            id: interaction.guild.id,
-            deny: [PermissionsBitField.Flags.ViewChannel]
-          },
-          {
-            id: interaction.user.id,
-            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
-          },
-          {
-            id: data.staff,
-            allow: [PermissionsBitField.Flags.ViewChannel]
-          }
+          { id: i.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: i.user.id, allow: [PermissionsBitField.Flags.ViewChannel] },
+          { id: data.staff, allow: [PermissionsBitField.Flags.ViewChannel] }
         ]
       });
+
+      db[ch.id] = { owner: i.user.id, claimed: null };
+      saveDB();
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Primary),
@@ -159,75 +133,66 @@ client.on("interactionCreate", async (interaction) => {
         new ButtonBuilder().setCustomId("transcript").setLabel("Transcript").setStyle(ButtonStyle.Secondary)
       );
 
-      await channel.send({ content: `👋 ${interaction.user}`, components: [row] });
+      await ch.send({
+        embeds: [new EmbedBuilder().setTitle("Ticket Opened").setDescription(`User: <@${i.user.id}>`)],
+        components: [row]
+      });
 
-      return interaction.reply({ content: "✅ Ticket Created", flags: 64 });
+      return i.reply({ content: "Ticket Created", flags: 64 });
     }
 
     // ===== CLAIM =====
-    if (interaction.isButton() && interaction.customId === "claim") {
-      const data = config[interaction.guild.id];
+    if (i.isButton() && i.customId === "claim") {
+      const data = db[i.guild.id];
+      if (!i.member.roles.cache.has(data.staff))
+        return i.reply({ content: "Staff only", flags: 64 });
 
-      if (!interaction.member.roles.cache.has(data.staff))
-        return interaction.reply({ content: "❌ Staff only", flags: 64 });
+      db[i.channel.id].claimed = i.user.id;
+      saveDB();
 
-      claimed[interaction.channel.id] = interaction.user.id;
-
-      await interaction.channel.send(`🛠️ Claimed by ${interaction.user}`);
-      return interaction.reply({ content: "✅ Claimed", flags: 64 });
+      return i.reply(`Claimed by ${i.user}`);
     }
 
     // ===== CLOSE =====
-    if (interaction.isButton() && interaction.customId === "close") {
-      const data = config[interaction.guild.id];
+    if (i.isButton() && i.customId === "close") {
+      const data = db[i.guild.id];
+      const ticket = db[i.channel.id];
 
-      if (!interaction.member.roles.cache.has(data.staff))
-        return interaction.reply({ content: "❌ Staff only", flags: 64 });
+      if (!i.member.roles.cache.has(data.staff))
+        return i.reply({ content: "Staff only", flags: 64 });
 
-      await interaction.reply("🔒 Closing...");
+      if (ticket.claimed && ticket.claimed !== i.user.id)
+        return i.reply({ content: "Only claimer can close", flags: 64 });
 
-      setTimeout(() => {
-        interaction.channel.delete().catch(() => {});
-      }, 3000);
+      await i.reply("Closing...");
+
+      setTimeout(() => i.channel.delete().catch(() => {}), 3000);
     }
 
     // ===== TRANSCRIPT =====
-    if (interaction.isButton() && interaction.customId === "transcript") {
+    if (i.isButton() && i.customId === "transcript") {
 
-      const messages = await interaction.channel.messages.fetch({ limit: 100 });
+      const msgs = await i.channel.messages.fetch({ limit: 100 });
 
       let html = `
-      <html>
-      <head>
-      <style>
-      body { background:#0d1117; color:white; font-family:sans-serif; }
-      .msg { margin:10px; padding:10px; background:#161b22; border-radius:8px; }
-      .user { color:#58a6ff; font-weight:bold; }
-      </style>
-      </head>
-      <body>
-      <h2>Ticket Transcript</h2>
+      <html><body style="background:#0d1117;color:white;">
+      <h2>Transcript</h2>
       `;
 
-      messages.reverse().forEach(m => {
-        html += `<div class="msg"><span class="user">${m.author.tag}</span>: ${m.content}</div>`;
+      msgs.reverse().forEach(m => {
+        html += `<p><b>${m.author.tag}:</b> ${m.content}</p>`;
       });
 
       html += "</body></html>";
 
-      const fs = require("fs");
-      const file = `transcript-${interaction.channel.id}.html`;
-
+      const file = `transcript-${i.channel.id}.html`;
       fs.writeFileSync(file, html);
 
-      await interaction.reply({
-        content: "📄 Transcript generated",
-        files: [file]
-      });
+      return i.reply({ files: [file] });
     }
 
-  } catch (err) {
-    console.log(err);
+  } catch (e) {
+    console.log(e);
   }
 });
 
