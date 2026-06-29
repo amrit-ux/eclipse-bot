@@ -4,7 +4,6 @@ const {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   RoleSelectMenuBuilder,
-  ChannelSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -21,6 +20,11 @@ require("dotenv").config();
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
+if (!TOKEN || !CLIENT_ID) {
+  console.log("❌ ENV missing");
+  process.exit(1);
+}
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
@@ -34,19 +38,29 @@ function saveDB() {
 }
 
 // ===== READY =====
-client.once("ready", async () => {
-  console.log(`✅ ${client.user.tag}`);
+client.once("clientReady", async () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
   const commands = [
-    new SlashCommandBuilder().setName("setup").setDescription("Setup Ticket"),
+    new SlashCommandBuilder()
+      .setName("setup")
+      .setDescription("Setup Ticket System"),
+
     new SlashCommandBuilder()
       .setName("rename")
-      .setDescription("Rename Ticket")
-      .addStringOption(o => o.setName("name").setRequired(true)),
+      .setDescription("Rename ticket")
+      .addStringOption(opt =>
+        opt
+          .setName("name")
+          .setDescription("New ticket name")
+          .setRequired(true)
+      )
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+
+  console.log("✅ Commands loaded");
 });
 
 // ===== INTERACTIONS =====
@@ -63,7 +77,7 @@ client.on("interactionCreate", async (i) => {
         .setPlaceholder("Select Staff Role");
 
       return i.reply({
-        content: "Select Staff Role",
+        content: "👨‍💼 Select Staff Role",
         components: [new ActionRowBuilder().addComponents(roleMenu)],
         flags: 64
       });
@@ -71,33 +85,36 @@ client.on("interactionCreate", async (i) => {
 
     // ===== RENAME =====
     if (i.isChatInputCommand() && i.commandName === "rename") {
+
       if (!i.channel.name.startsWith("ticket-"))
-        return i.reply({ content: "Not a ticket", flags: 64 });
+        return i.reply({ content: "❌ Not a ticket", flags: 64 });
 
       await i.channel.setName(i.options.getString("name"));
-      return i.reply({ content: "Renamed", flags: 64 });
+      return i.reply({ content: "✅ Renamed", flags: 64 });
     }
 
     // ===== ROLE SELECT =====
     if (i.isRoleSelectMenu()) {
+
       db[i.guild.id] = { staff: i.values[0], count: 0 };
       saveDB();
 
       const panel = new StringSelectMenuBuilder()
         .setCustomId("panel")
-        .setPlaceholder("Create Ticket")
+        .setPlaceholder("🎫 Create Ticket")
         .addOptions([
           { label: "Support", value: "support" },
-          { label: "Billing", value: "billing" }
+          { label: "Billing", value: "billing" },
+          { label: "Report", value: "report" }
         ]);
 
       return i.update({
-        content: "Setup Done",
+        content: "✅ Setup Done",
         components: [new ActionRowBuilder().addComponents(panel)]
       });
     }
 
-    // ===== CREATE =====
+    // ===== CREATE TICKET =====
     if (i.isStringSelectMenu() && i.customId === "panel") {
 
       const data = db[i.guild.id];
@@ -105,21 +122,21 @@ client.on("interactionCreate", async (i) => {
 
       // cooldown
       if (db[`cool_${i.user.id}`] && Date.now() - db[`cool_${i.user.id}`] < 5000)
-        return i.reply({ content: "Wait before creating ticket", flags: 64 });
+        return i.reply({ content: "⏳ Wait before creating another ticket", flags: 64 });
 
       db[`cool_${i.user.id}`] = Date.now();
 
       data.count++;
       saveDB();
 
-      const name = `ticket-${String(data.count).padStart(3, "0")}`;
+      const name = `${i.values[0]}-${String(data.count).padStart(3, "0")}`;
 
       const ch = await i.guild.channels.create({
         name,
         type: ChannelType.GuildText,
         permissionOverwrites: [
           { id: i.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-          { id: i.user.id, allow: [PermissionsBitField.Flags.ViewChannel] },
+          { id: i.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
           { id: data.staff, allow: [PermissionsBitField.Flags.ViewChannel] }
         ]
       });
@@ -133,40 +150,46 @@ client.on("interactionCreate", async (i) => {
         new ButtonBuilder().setCustomId("transcript").setLabel("Transcript").setStyle(ButtonStyle.Secondary)
       );
 
-      await ch.send({
-        embeds: [new EmbedBuilder().setTitle("Ticket Opened").setDescription(`User: <@${i.user.id}>`)],
-        components: [row]
-      });
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 Ticket Opened")
+        .setDescription(`👤 User: <@${i.user.id}>\n📌 Type: ${i.values[0]}`)
+        .setColor("Green");
 
-      return i.reply({ content: "Ticket Created", flags: 64 });
+      await ch.send({ embeds: [embed], components: [row] });
+
+      return i.reply({ content: "✅ Ticket Created", flags: 64 });
     }
 
     // ===== CLAIM =====
     if (i.isButton() && i.customId === "claim") {
+
       const data = db[i.guild.id];
       if (!i.member.roles.cache.has(data.staff))
-        return i.reply({ content: "Staff only", flags: 64 });
+        return i.reply({ content: "❌ Staff only", flags: 64 });
 
       db[i.channel.id].claimed = i.user.id;
       saveDB();
 
-      return i.reply(`Claimed by ${i.user}`);
+      return i.reply(`🛠️ Claimed by ${i.user}`);
     }
 
     // ===== CLOSE =====
     if (i.isButton() && i.customId === "close") {
+
       const data = db[i.guild.id];
       const ticket = db[i.channel.id];
 
       if (!i.member.roles.cache.has(data.staff))
-        return i.reply({ content: "Staff only", flags: 64 });
+        return i.reply({ content: "❌ Staff only", flags: 64 });
 
       if (ticket.claimed && ticket.claimed !== i.user.id)
-        return i.reply({ content: "Only claimer can close", flags: 64 });
+        return i.reply({ content: "❌ Only claimer can close", flags: 64 });
 
-      await i.reply("Closing...");
+      await i.reply("🔒 Closing ticket...");
 
-      setTimeout(() => i.channel.delete().catch(() => {}), 3000);
+      setTimeout(() => {
+        i.channel.delete().catch(() => {});
+      }, 3000);
     }
 
     // ===== TRANSCRIPT =====
@@ -175,12 +198,20 @@ client.on("interactionCreate", async (i) => {
       const msgs = await i.channel.messages.fetch({ limit: 100 });
 
       let html = `
-      <html><body style="background:#0d1117;color:white;">
-      <h2>Transcript</h2>
+      <html>
+      <head>
+      <style>
+      body { background:#0d1117; color:white; font-family:sans-serif; }
+      .msg { margin:10px; padding:10px; background:#161b22; border-radius:8px; }
+      .user { color:#58a6ff; font-weight:bold; }
+      </style>
+      </head>
+      <body>
+      <h2>Ticket Transcript</h2>
       `;
 
       msgs.reverse().forEach(m => {
-        html += `<p><b>${m.author.tag}:</b> ${m.content}</p>`;
+        html += `<div class="msg"><span class="user">${m.author.tag}</span>: ${m.content}</div>`;
       });
 
       html += "</body></html>";
@@ -188,12 +219,19 @@ client.on("interactionCreate", async (i) => {
       const file = `transcript-${i.channel.id}.html`;
       fs.writeFileSync(file, html);
 
-      return i.reply({ files: [file] });
+      return i.reply({
+        content: "📄 Transcript Generated",
+        files: [file]
+      });
     }
 
-  } catch (e) {
-    console.log(e);
+  } catch (err) {
+    console.log(err);
   }
 });
+
+// ===== CRASH PROTECTION =====
+client.on("error", console.error);
+process.on("unhandledRejection", console.error);
 
 client.login(TOKEN);
