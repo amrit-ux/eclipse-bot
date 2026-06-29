@@ -42,6 +42,19 @@ client.on("interactionCreate", async (interaction) => {
 
   // CREATE TICKET
   if (interaction.customId === "create_ticket") {
+
+    // 🔥 PREVENT DUPLICATE
+    const existing = interaction.guild.channels.cache.find(
+      ch => ch.name === `ticket-${interaction.user.username}`
+    );
+
+    if (existing) {
+      return interaction.reply({
+        content: "❌ You already have an open ticket!",
+        ephemeral: true
+      });
+    }
+
     const channel = await interaction.guild.channels.create({
       name: `ticket-${interaction.user.username}`,
       type: ChannelType.GuildText,
@@ -69,16 +82,22 @@ client.on("interactionCreate", async (interaction) => {
       components: [row]
     });
 
-    await interaction.reply({ content: "Ticket created!", ephemeral: true });
+    await interaction.reply({
+      content: "✅ Ticket created!",
+      ephemeral: true
+    });
   }
 
   // CLOSE TICKET
   if (interaction.customId === "close_ticket") {
-    await interaction.reply("Closing ticket in 5 seconds...");
+    await interaction.reply({
+      content: "🔒 Closing ticket in 3 seconds...",
+      ephemeral: true
+    });
 
     setTimeout(() => {
-      interaction.channel.delete();
-    }, 5000);
+      interaction.channel.delete().catch(() => {});
+    }, 3000);
   }
 });
 
