@@ -18,7 +18,6 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// 🧠 TEMP STORAGE (restart pe reset hoga)
 const config = {};
 
 // ================= READY =================
@@ -68,140 +67,150 @@ client.on("interactionCreate", async (interaction) => {
 
   if (!interaction.guild) return;
 
-  // ===== SETUP =====
-  if (interaction.isChatInputCommand()) {
+  try {
 
-    if (interaction.commandName === "setup") {
+    // ===== COMMANDS =====
+    if (interaction.isChatInputCommand()) {
 
-      const staff = interaction.options.getRole("staff_role");
-      const category = interaction.options.getChannel("category");
-      const logs = interaction.options.getChannel("logs");
+      if (interaction.commandName === "setup") {
 
-      config[interaction.guild.id] = {
-        staff: staff.id,
-        category: category.id,
-        logs: logs ? logs.id : null
-      };
+        const staff = interaction.options.getRole("staff_role");
+        const category = interaction.options.getChannel("category");
+        const logs = interaction.options.getChannel("logs");
 
-      return interaction.reply({
-        content: "✅ Ticket system setup complete!",
-        ephemeral: true
-      });
-    }
+        config[interaction.guild.id] = {
+          staff: staff.id,
+          category: category.id,
+          logs: logs ? logs.id : null
+        };
 
-    // ===== PANEL =====
-    if (interaction.commandName === "panel") {
-
-      if (!config[interaction.guild.id]) {
         return interaction.reply({
-          content: "❌ Run /setup first",
-          ephemeral: true
+          content: "✅ Ticket system setup complete!",
+          flags: 64
         });
       }
 
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId("ticket_menu")
-        .setPlaceholder("🎫 Select category")
-        .addOptions([
-          { label: "Support", value: "support" },
-          { label: "Billing", value: "billing" },
-          { label: "Report", value: "report" }
-        ]);
+      if (interaction.commandName === "panel") {
 
-      const row = new ActionRowBuilder().addComponents(menu);
+        if (!config[interaction.guild.id]) {
+          return interaction.reply({
+            content: "❌ Run /setup first",
+            flags: 64
+          });
+        }
 
-      return interaction.reply({
-        content: "🎫 Create a ticket:",
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId("ticket_menu")
+          .setPlaceholder("🎫 Select category")
+          .addOptions([
+            { label: "Support", value: "support" },
+            { label: "Billing", value: "billing" },
+            { label: "Report", value: "report" }
+          ]);
+
+        const row = new ActionRowBuilder().addComponents(menu);
+
+        return interaction.reply({
+          content: "🎫 Create a ticket:",
+          components: [row]
+        });
+      }
+    }
+
+    // ===== CREATE TICKET =====
+    if (interaction.isStringSelectMenu()) {
+
+      if (interaction.customId !== "ticket_menu") return;
+
+      const data = config[interaction.guild.id];
+      if (!data) return;
+
+      await interaction.deferReply({ flags: 64 }); // ✅ FIX
+
+      const existing = interaction.guild.channels.cache.find(
+        ch => ch.topic === interaction.user.id
+      );
+
+      if (existing) {
+        return interaction.editReply("❌ Already have ticket");
+      }
+
+      const channel = await interaction.guild.channels.create({
+        name: `ticket-${interaction.user.username}`,
+        type: ChannelType.GuildText,
+        parent: data.category,
+        topic: interaction.user.id,
+        permissionOverwrites: [
+          {
+            id: interaction.guild.id,
+            deny: [PermissionsBitField.Flags.ViewChannel]
+          },
+          {
+            id: interaction.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages
+            ]
+          },
+          {
+            id: data.staff,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages
+            ]
+          }
+        ]
+      });
+
+      const closeBtn = new ButtonBuilder()
+        .setCustomId("close")
+        .setLabel("🔒 Close")
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(closeBtn);
+
+      await channel.send({
+        content: `👋 ${interaction.user} welcome!`,
         components: [row]
       });
-    }
-  }
 
-  // ===== CREATE TICKET =====
-  if (interaction.isStringSelectMenu()) {
-
-    const data = config[interaction.guild.id];
-    if (!data) return;
-
-    const existing = interaction.guild.channels.cache.find(
-      ch => ch.topic === interaction.user.id
-    );
-
-    if (existing) {
-      return interaction.reply({
-        content: "❌ Already have ticket",
-        ephemeral: true
-      });
-    }
-
-    await interaction.reply({ content: "⏳ Creating...", ephemeral: true });
-
-    const channel = await interaction.guild.channels.create({
-      name: `ticket-${interaction.user.username}`,
-      type: ChannelType.GuildText,
-      parent: data.category,
-      topic: interaction.user.id,
-      permissionOverwrites: [
-        {
-          id: interaction.guild.id,
-          deny: [PermissionsBitField.Flags.ViewChannel]
-        },
-        {
-          id: interaction.user.id,
-          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
-        },
-        {
-          id: data.staff,
-          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
-        }
-      ]
-    });
-
-    const closeBtn = new ButtonBuilder()
-      .setCustomId("close")
-      .setLabel("🔒 Close")
-      .setStyle(ButtonStyle.Danger);
-
-    const row = new ActionRowBuilder().addComponents(closeBtn);
-
-    await channel.send({
-      content: `👋 ${interaction.user} welcome!`,
-      components: [row]
-    });
-
-    // LOG
-    if (data.logs) {
-      const logChannel = interaction.guild.channels.cache.get(data.logs);
-      if (logChannel) {
-        logChannel.send(`📥 Ticket created by ${interaction.user.tag}`);
-      }
-    }
-
-    interaction.editReply("✅ Ticket created");
-  }
-
-  // ===== CLOSE =====
-  if (interaction.isButton()) {
-
-    const data = config[interaction.guild.id];
-
-    if (interaction.customId === "close") {
-
-      await interaction.reply("🔒 Ticket closed");
-
-      if (data?.logs) {
+      if (data.logs) {
         const logChannel = interaction.guild.channels.cache.get(data.logs);
         if (logChannel) {
-          logChannel.send(`🔒 Closed by ${interaction.user.tag}`);
+          logChannel.send(`📥 Ticket created by ${interaction.user.tag}`);
         }
       }
 
-      setTimeout(() => {
-        interaction.channel.delete().catch(() => {});
-      }, 3000);
+      await interaction.editReply("✅ Ticket created");
     }
-  }
 
+    // ===== BUTTON =====
+    if (interaction.isButton()) {
+
+      const data = config[interaction.guild.id];
+
+      if (interaction.customId === "close") {
+
+        await interaction.deferUpdate(); // ✅ FIX
+
+        await interaction.channel.send("🔒 Ticket closed");
+
+        if (data?.logs) {
+          const logChannel = interaction.guild.channels.cache.get(data.logs);
+          if (logChannel) {
+            logChannel.send(`🔒 Closed by ${interaction.user.tag}`);
+          }
+        }
+
+        setTimeout(() => {
+          interaction.channel.delete().catch(() => {});
+        }, 3000);
+      }
+    }
+
+  } catch (err) {
+    console.error(err);
+  }
 });
 
 client.login(process.env.TOKEN);
