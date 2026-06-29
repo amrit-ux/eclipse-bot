@@ -63,3 +63,40 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.login(process.env.TOKEN);
+if (interaction.customId === "create_ticket") {
+  const channel = await interaction.guild.channels.create({
+    name: `ticket-${interaction.user.username}`,
+    type: ChannelType.GuildText,
+    permissionOverwrites: [
+      {
+        id: interaction.guild.id,
+        deny: [PermissionsBitField.Flags.ViewChannel]
+      },
+      {
+        id: interaction.user.id,
+        allow: [PermissionsBitField.Flags.ViewChannel]
+      }
+    ]
+  });
+
+  const closeBtn = new ButtonBuilder()
+    .setCustomId("close_ticket")
+    .setLabel("🔒 Close Ticket")
+    .setStyle(ButtonStyle.Danger);
+
+  const row = new ActionRowBuilder().addComponents(closeBtn);
+
+  channel.send({
+    content: `Hello ${interaction.user}, support will be with you shortly.`,
+    components: [row]
+  });
+
+  interaction.reply({ content: "Ticket created!", ephemeral: true });
+}
+if (interaction.customId === "close_ticket") {
+  await interaction.reply("Closing ticket in 5 seconds...");
+
+  setTimeout(() => {
+    interaction.channel.delete();
+  }, 5000);
+}
