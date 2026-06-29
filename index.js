@@ -1,4 +1,13 @@
-const { Client, GatewayIntentBits, ButtonBuilder, ButtonStyle, ActionRowBuilder, ChannelType, PermissionsBitField } = require('discord.js');
+const { 
+  Client, 
+  GatewayIntentBits, 
+  ButtonBuilder, 
+  ButtonStyle, 
+  ActionRowBuilder, 
+  ChannelType, 
+  PermissionsBitField 
+} = require('discord.js');
+
 require("dotenv").config();
 
 const client = new Client({
@@ -10,18 +19,15 @@ const client = new Client({
 });
 
 client.once("ready", () => {
-  console.log(`Bot is online as ${client.user.tag}`);
+  console.log(`✅ Bot is online as ${client.user.tag}`);
 });
 
-// COMMANDS
+// ================= COMMAND =================
 client.on('messageCreate', message => {
   if (message.author.bot) return;
 
-  if (message.content === '!hi') {
-    message.reply('Hello 👋');
-  }
+  if (message.content === '!panel') {
 
-  if (message.content === "!panel") {
     const button = new ButtonBuilder()
       .setCustomId("create_ticket")
       .setLabel("🎫 Create Ticket")
@@ -30,75 +36,97 @@ client.on('messageCreate', message => {
     const row = new ActionRowBuilder().addComponents(button);
 
     message.channel.send({
-      content: "Click to create a ticket",
+      content: "🎫 Click below to create a ticket",
       components: [row]
     });
   }
 });
 
-// BUTTON SYSTEM
+// ================= BUTTON SYSTEM =================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
   if (!interaction.guild) return;
 
-  // CREATE TICKET
-  if (interaction.customId === "create_ticket") {
+  try {
 
-    await interaction.deferReply({ ephemeral: true });
+    // ========= CREATE TICKET =========
+    if (interaction.customId === "create_ticket") {
 
-    // 🔥 prevent duplicate (using user ID)
-    const existing = interaction.guild.channels.cache.find(
-      ch => ch.topic === interaction.user.id
-    );
+      // ✅ check duplicate FIRST (no defer)
+      const existing = interaction.guild.channels.cache.find(
+        ch => ch.topic === interaction.user.id
+      );
 
-    if (existing) {
-      return interaction.editReply("❌ You already have an open ticket!");
+      if (existing) {
+        return interaction.reply({
+          content: "❌ You already have an open ticket!",
+          ephemeral: true
+        });
+      }
+
+      // ✅ instant reply (prevents unknown interaction)
+      await interaction.reply({
+        content: "⏳ Creating your ticket...",
+        ephemeral: true
+      });
+
+      const channel = await interaction.guild.channels.create({
+        name: `ticket-${interaction.user.username}`,
+        type: ChannelType.GuildText,
+        topic: interaction.user.id,
+        permissionOverwrites: [
+          {
+            id: interaction.guild.id,
+            deny: [PermissionsBitField.Flags.ViewChannel]
+          },
+          {
+            id: interaction.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages
+            ]
+          }
+        ]
+      });
+
+      const closeBtn = new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("🔒 Close Ticket")
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(closeBtn);
+
+      await channel.send({
+        content: `👋 Hello ${interaction.user}\nSupport will be with you shortly.`,
+        components: [row]
+      });
+
+      // ✅ update reply instead of new reply
+      await interaction.editReply("✅ Your ticket has been created!");
     }
 
-    const channel = await interaction.guild.channels.create({
-      name: `ticket-${interaction.user.username}`,
-      type: ChannelType.GuildText,
-      topic: interaction.user.id, // 🔥 important
-      permissionOverwrites: [
-        {
-          id: interaction.guild.id,
-          deny: [PermissionsBitField.Flags.ViewChannel]
-        },
-        {
-          id: interaction.user.id,
-          allow: [PermissionsBitField.Flags.ViewChannel]
-        }
-      ]
-    });
+    // ========= CLOSE TICKET =========
+    if (interaction.customId === "close_ticket") {
 
-    const closeBtn = new ButtonBuilder()
-      .setCustomId("close_ticket")
-      .setLabel("🔒 Close Ticket")
-      .setStyle(ButtonStyle.Danger);
+      await interaction.reply({
+        content: "🔒 Closing ticket in 2 seconds...",
+        ephemeral: true
+      });
 
-    const row = new ActionRowBuilder().addComponents(closeBtn);
+      setTimeout(() => {
+        interaction.channel.delete().catch(console.error);
+      }, 2000);
+    }
 
-    await channel.send({
-      content: `Hello ${interaction.user}, support will be with you shortly.`,
-      components: [row]
-    });
+  } catch (err) {
+    console.error("❌ Error:", err);
 
-    await interaction.editReply("✅ Ticket created!");
-  }
-
-  // CLOSE TICKET
-  if (interaction.customId === "close_ticket") {
-
-    await interaction.reply({
-      content: "🔒 Closing ticket in 3 seconds...",
-      ephemeral: true
-    });
-
-    setTimeout(async () => {
-      if (interaction.channel) {
-        await interaction.channel.delete().catch(console.error);
-      }
-    }, 3000);
+    if (!interaction.replied) {
+      interaction.reply({
+        content: "⚠️ Something went wrong!",
+        ephemeral: true
+      }).catch(() => {});
+    }
   }
 });
 
