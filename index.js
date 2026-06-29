@@ -2,7 +2,6 @@ require("dotenv").config();
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
-  ]
 });
 
 client.on('ready', () => {
