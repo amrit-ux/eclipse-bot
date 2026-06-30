@@ -21,3 +21,15 @@ if (interaction.isButton()) {
     interaction.reply({ content: `Created: ${channel}`, ephemeral: true });
   }
 }
+
+if (interaction.customId === "claim_ticket") {
+  interaction.channel.send(`Ticket claimed by ${interaction.user}`);
+}
+if (interaction.customId === "close_ticket") {
+
+  if (!interaction.member.roles.cache.has("STAFF_ROLE_ID")) {
+    return interaction.reply({ content: "Only Staff can close", ephemeral: true });
+  }
+
+  interaction.channel.delete();
+}
