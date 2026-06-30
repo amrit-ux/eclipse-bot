@@ -6,7 +6,6 @@ module.exports = {
     .setDescription("Setup ticket system"),
 
   async execute(interaction) {
-
     await interaction.reply({
       content: "🎫 Click to create ticket",
       components: [
@@ -17,11 +16,11 @@ module.exports = {
               type: 2,
               label: "Create Ticket",
               style: 1,
-              custom_id: "create_ticket"
-            }
-          ]
-        }
-      ]
+              custom_id: "create_ticket",
+            },
+          ],
+        },
+      ],
     });
-  }
+  },
 };
